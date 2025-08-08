@@ -66,8 +66,13 @@ public class UserService {
             user.setFullName(userDTO.getFullName());
             updated = true;
         }
-        if (userDTO.getRole() != null) {
-            user.setRole(userDTO.getRole());
+        // FIX: Add logic to update the email field
+        if (userDTO.getEmail() != null && !userDTO.getEmail().isBlank()) {
+            // Optional: Add email uniqueness check here if needed for updates
+            if (!user.getEmail().equals(userDTO.getEmail()) && userRepository.existsByEmail(userDTO.getEmail())) {
+                throw new IllegalArgumentException("New email is already in use by another user: " + userDTO.getEmail());
+            }
+            user.setEmail(userDTO.getEmail());
             updated = true;
         }
 
