@@ -3,7 +3,7 @@ package com.snmp.PrinterMonitoring.controllers;
 import com.snmp.PrinterMonitoring.dtos.users.ChangePasswordRequest;
 import com.snmp.PrinterMonitoring.dtos.users.CreateUserRequest;
 import com.snmp.PrinterMonitoring.dtos.users.UpdateUserRequest;
-import com.snmp.PrinterMonitoring.dtos.users.UserDTO; // <--- Import UserDTO
+import com.snmp.PrinterMonitoring.dtos.users.UserDTO;
 import com.snmp.PrinterMonitoring.dtos.users.UserResponseDTO;
 import com.snmp.PrinterMonitoring.dtos.auth.UserProfileResponse;
 import com.snmp.PrinterMonitoring.services.UserService;
@@ -13,7 +13,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.modelmapper.ModelMapper; // <--- Import ModelMapper
+import org.modelmapper.ModelMapper;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -29,16 +29,20 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
 
     private final UserService userService;
-    private final ModelMapper modelMapper; // <--- Fix 3: Inject ModelMapper
+    private final ModelMapper modelMapper;
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Create user", description = "Create a new user account (Admin only)")
     public ResponseEntity<UserResponseDTO> createUser(
-            @Valid @RequestBody CreateUserRequest createUserRequest) { // Change param name for clarity
-        // Fix 2: Convert CreateUserRequest to UserDTO
+            @Valid @RequestBody CreateUserRequest createUserRequest) {
+
+        // Convert CreateUserRequest to UserDTO
         UserDTO userDTO = modelMapper.map(createUserRequest, UserDTO.class);
+
+        // Call service to create user and get response DTO
         UserResponseDTO createdUser = userService.createUser(userDTO);
+
         return ResponseEntity.status(HttpStatus.CREATED).body(createdUser);
     }
 
@@ -52,15 +56,15 @@ public class UserController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get user by ID", description = "Get user details by ID")
-    public ResponseEntity<UserResponseDTO> getUserById(
-            @PathVariable Long id) {
+    public ResponseEntity<UserResponseDTO> getUserById(@PathVariable Long id) {
         return userService.getUserById(id)
                 .map(user -> ResponseEntity.ok(modelMapper.map(user, UserResponseDTO.class)))
-                .orElse(ResponseEntity.notFound().build());
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PutMapping("/{id}")
     @Operation(summary = "Update user", description = "Update user information")
+    @PreAuthorize("hasRole('ADMIN') or (#id == authentication.principal.id)") // Allow admin or self-update
     public ResponseEntity<UserResponseDTO> updateUser(
             @PathVariable Long id,
             @Valid @RequestBody UpdateUserRequest userDTO) {
@@ -83,6 +87,7 @@ public class UserController {
 
     @PutMapping("/{id}/password")
     @Operation(summary = "Change password", description = "Change user's password")
+    @PreAuthorize("isAuthenticated() and #id == @userRepository.findByEmail(authentication.name).orElseThrow().getId()") // NEW: Allow authenticated user to change their own password
     public ResponseEntity<Void> changePassword(
             @PathVariable Long id,
             @Valid @RequestBody ChangePasswordRequest request) {

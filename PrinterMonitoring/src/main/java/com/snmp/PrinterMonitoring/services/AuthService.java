@@ -5,8 +5,8 @@ import com.snmp.PrinterMonitoring.dtos.auth.AuthResponse;
 import com.snmp.PrinterMonitoring.dtos.auth.RefreshTokenRequest;
 import com.snmp.PrinterMonitoring.dtos.auth.UserProfileResponse;
 import com.snmp.PrinterMonitoring.dtos.users.UserDTO;
-import com.snmp.PrinterMonitoring.dtos.users.UserResponseDTO;
-import com.snmp.PrinterMonitoring.entities.User; // Ensure this is the correct User entity import
+import com.snmp.PrinterMonitoring.dtos.users.UserResponseDTO; // Ensure this is imported
+import com.snmp.PrinterMonitoring.entities.User;
 import com.snmp.PrinterMonitoring.repositories.UserRepository;
 import com.snmp.PrinterMonitoring.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +18,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional; // Keep @Transactional import
 
 import java.util.Date;
 
@@ -27,30 +28,35 @@ public class AuthService {
 
     private final AuthenticationManager authenticationManager;
     private final UserRepository userRepository;
-    private final UserService userService;
+    private final UserService userService; // Already injected for createUser
     private final JwtUtil jwtUtil;
     private final ModelMapper modelMapper;
 
     /**
-     * Registers a new user and returns a JWT token
+     * Registers a new user and returns a JWT token along with user details.
      */
+    @Transactional // Ensure transactional for user creation
     public AuthResponse register(UserDTO userDTO) {
         if (userRepository.existsByEmail(userDTO.getEmail())) {
             throw new IllegalArgumentException("Email already in use.");
         }
 
-        UserResponseDTO createdUserResponse = userService.createUser(userDTO); // This returns a DTO
-        // We need the actual User entity to pass to JwtUtil
-        User registeredUser = userRepository.findByEmail(createdUserResponse.getEmail())
-                .orElseThrow(() -> new UsernameNotFoundException("Registered user not found!"));
+        // Call userService to create user (handles password generation and emailing)
+        UserResponseDTO createdUserResponse = userService.createUser(userDTO);
 
-        String token = jwtUtil.generateToken(registeredUser); // MODIFIED: Pass User object
-        String refreshToken = jwtUtil.generateRefreshToken(registeredUser.getEmail()); // Still uses email for refresh
-        return new AuthResponse(token, refreshToken, "User registered successfully.");
+        // Fetch the actual User entity needed by JwtUtil for claims
+        User registeredUser = userRepository.findByEmail(createdUserResponse.getEmail())
+                .orElseThrow(() -> new UsernameNotFoundException("Registered user not found after creation!"));
+
+        String token = jwtUtil.generateToken(registeredUser);
+        String refreshToken = jwtUtil.generateRefreshToken(registeredUser.getEmail());
+
+        // MODIFIED: Populate the 'user' field in AuthResponse
+        return new AuthResponse(token, refreshToken, "User registered successfully.", createdUserResponse);
     }
 
     /**
-     * Authenticates user and returns a JWT token
+     * Authenticates user and returns a JWT token along with user details.
      */
     public AuthResponse login(AuthRequest authRequest) {
         try {
@@ -61,28 +67,28 @@ public class AuthService {
                     )
             );
 
-            // Get the principal, which is usually a Spring Security UserDetails object
             org.springframework.security.core.userdetails.User springUser =
                     (org.springframework.security.core.userdetails.User) authentication.getPrincipal();
 
             String email = springUser.getUsername();
-            // Find the full User entity from the database to get its role
             User authenticatedUser = userRepository.findByEmail(email)
                     .orElseThrow(() -> new UsernameNotFoundException("User not found: " + email));
 
-            String token = jwtUtil.generateToken(authenticatedUser); // MODIFIED: Pass User object
-            String refreshToken = jwtUtil.generateRefreshToken(authenticatedUser.getEmail()); // Still uses email for refresh
+            String token = jwtUtil.generateToken(authenticatedUser);
+            String refreshToken = jwtUtil.generateRefreshToken(authenticatedUser.getEmail());
 
-            return new AuthResponse(token, refreshToken, "Login successful.");
+            // MODIFIED: Map authenticatedUser to UserResponseDTO and populate 'user' field in AuthResponse
+            UserResponseDTO authenticatedUserDTO = modelMapper.map(authenticatedUser, UserResponseDTO.class);
+            return new AuthResponse(token, refreshToken, "Login successful.", authenticatedUserDTO);
         } catch (BadCredentialsException e) {
             throw new IllegalArgumentException("Invalid email or password.");
         }
     }
 
     /**
-     * Refreshes JWT token using a refresh token.
+     * Refreshes JWT token using a refresh token, returning new tokens and user details.
      * @param refreshRequest Contains the refresh token.
-     * @return New AuthResponse with new access token and refresh token.
+     * @return New AuthResponse with new access token, refresh token, and user details.
      * @throws IllegalArgumentException if refresh token is invalid or expired.
      */
     public AuthResponse refreshToken(RefreshTokenRequest refreshRequest) {
@@ -99,13 +105,15 @@ public class AuthService {
                 throw new IllegalArgumentException("Invalid or expired refresh token.");
             }
 
-            // For refresh token, we also need to get the User entity to generate the new access token with claims
             User userForNewToken = userRepository.findByEmail(userEmail)
                     .orElseThrow(() -> new UsernameNotFoundException("User not found for refresh token: " + userEmail));
 
-            String newAccessToken = jwtUtil.generateToken(userForNewToken); // MODIFIED: Pass User object
+            String newAccessToken = jwtUtil.generateToken(userForNewToken);
             String newRefreshToken = jwtUtil.generateRefreshToken(userForNewToken.getEmail());
-            return new AuthResponse(newAccessToken, newRefreshToken, "Token refreshed successfully.");
+
+            // MODIFIED: Map userForNewToken to UserResponseDTO and populate 'user' field in AuthResponse
+            UserResponseDTO refreshedUserDTO = modelMapper.map(userForNewToken, UserResponseDTO.class);
+            return new AuthResponse(newAccessToken, newRefreshToken, "Token refreshed successfully.", refreshedUserDTO);
         } catch (Exception e) {
             throw new IllegalArgumentException("Invalid or expired refresh token: " + e.getMessage());
         }

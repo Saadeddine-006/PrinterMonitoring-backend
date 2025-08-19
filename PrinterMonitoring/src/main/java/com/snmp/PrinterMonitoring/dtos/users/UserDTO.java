@@ -22,10 +22,5 @@ public class UserDTO {
     @Email(message = "Invalid email format")
     private String email;
 
-    @NotBlank(message = "Password is required")
-    @Size(min = 6, message = "Password must be at least 6 characters long")
-    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY) // Password only for input, never in response
-    private String password;
-
     private Role role;
 }

@@ -1,10 +1,11 @@
-package com.snmp.PrinterMonitoring.security;
+package com.snmp.PrinterMonitoring.config;
 
+import com.snmp.PrinterMonitoring.security.JwtAuthenticationFilter;
 import com.snmp.PrinterMonitoring.services.CustomUserDetailsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpMethod; // Make sure this is imported
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -26,7 +27,7 @@ import java.util.Arrays; // Pour Arrays.asList
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity
+@EnableMethodSecurity // This is correctly enabled
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -37,7 +38,7 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
-                .cors(cors -> cors.configurationSource(corsConfigurationSource())) // <-- LIGNE AJOUTÉE POUR ACTIVER CORS
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         // Public endpoints (Swagger, root, error, health)
@@ -50,14 +51,20 @@ public class SecurityConfig {
                                 "/api-docs/**",
                                 "/actuator/health"
                         ).permitAll()
-                        // Prise en charge des endpoints auth publics sous /api/v1/auth/**
+                        // Public auth endpoints under /api/auth/**
                         .requestMatchers("/api/auth/**").permitAll()
 
                         // User management
-                        // /api/users/me is handled by .anyRequest().authenticated() below
+                        // GET /api/users: All authenticated users can view list (if their role allows, see method security)
                         .requestMatchers(HttpMethod.GET, "/api/users").hasAnyRole("ADMIN", "TECHNICIAN", "VIEWER")
+                        // POST /api/users: Only ADMIN can create users
                         .requestMatchers(HttpMethod.POST, "/api/users").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.PUT, "/api/users/**").hasRole("ADMIN")
+                        // PUT /api/users/{id} and /api/users/{id}/password:
+                        // Now allows ANY authenticated user to reach the controller method.
+                        // The @PreAuthorize on UserController will then ensure they can only update their OWN profile/password.
+                        .requestMatchers(HttpMethod.PUT, "/api/users/**").authenticated() // CHANGED THIS LINE
+
+                        // DELETE /api/users/**: Only ADMIN can delete users
                         .requestMatchers(HttpMethod.DELETE, "/api/users/**").hasRole("ADMIN")
 
                         // Printer management (assuming these are correct roles for your app)

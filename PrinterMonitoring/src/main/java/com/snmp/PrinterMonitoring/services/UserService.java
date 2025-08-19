@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -28,19 +29,33 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final ModelMapper modelMapper;
+    private final MailService mailService; // NEW: inject MailService
 
     @Transactional
-    public UserResponseDTO createUser(UserDTO userDTO) { // CHANGE: Return type is now UserResponseDTO
+    public UserResponseDTO createUser(UserDTO userDTO) {
         if (userRepository.existsByEmail(userDTO.getEmail())) {
             throw new IllegalArgumentException("Email already in use: " + userDTO.getEmail());
         }
 
+        // ✅ Generate random password
+        String rawPassword = UUID.randomUUID().toString().substring(0, 8);
+
         User user = modelMapper.map(userDTO, User.class);
-        user.setPassword(passwordEncoder.encode(userDTO.getPassword()));
+        user.setPassword(passwordEncoder.encode(rawPassword)); // save encoded password
         user.setRole(userDTO.getRole() != null ? userDTO.getRole() : Role.VIEWER);
         user.setActive(true);
-        User savedUser = userRepository.save(user); // Save the user
-        return modelMapper.map(savedUser, UserResponseDTO.class); // Map and return DTO
+
+        User savedUser = userRepository.save(user);
+
+        // ✅ Send welcome email
+        mailService.sendWelcomeEmail(
+                savedUser.getEmail(),
+                savedUser.getFullName() != null ? savedUser.getFullName() : savedUser.getEmail()
+                ,
+                rawPassword
+        );
+
+        return modelMapper.map(savedUser, UserResponseDTO.class);
     }
 
     public Optional<User> getUserByEmail(String email) {
@@ -66,9 +81,7 @@ public class UserService {
             user.setFullName(userDTO.getFullName());
             updated = true;
         }
-        // FIX: Add logic to update the email field
         if (userDTO.getEmail() != null && !userDTO.getEmail().isBlank()) {
-            // Optional: Add email uniqueness check here if needed for updates
             if (!user.getEmail().equals(userDTO.getEmail()) && userRepository.existsByEmail(userDTO.getEmail())) {
                 throw new IllegalArgumentException("New email is already in use by another user: " + userDTO.getEmail());
             }
